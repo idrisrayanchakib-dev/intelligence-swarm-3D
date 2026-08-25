@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AAC SWARM VISUALIZER</title>
+    <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <style>
+        body { 
+            margin: 0; padding: 0; 
+            width: 100vw; height: 100vh; 
+            overflow: hidden; 
+            background-color: #000; 
+            color: white; 
+            font-family: 'Rajdhani', sans-serif;
+        }
+
+        /* --- CANVAS PLEIN ECRAN --- */
+        #viewport {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            z-index: 0; 
+        }
+
+        /* --- SIDEBARS --- */
+        .sidebar {
+            position: absolute;
+            top: 0; bottom: 0;
+            width: 300px;
+            background: rgba(10, 12, 16, 0.90);
+            backdrop-filter: blur(8px);
+            z-index: 10;
+            transition: transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+            display: flex; flex-direction: column;
+            border-bottom: 2px solid #00ffff;
+            box-shadow: 0 0 30px rgba(0,0,0,0.8);
+            overflow: visible; /* Pour laisser dépasser les boutons */
+        }
+
+        .left-panel { left: 0; border-right: 1px solid rgba(0, 255, 255, 0.3); }
+        .right-panel { right: 0; border-left: 1px solid rgba(0, 255, 255, 0.3); }
+
+        .left-panel.closed { transform: translateX(-100%); }
+        .right-panel.closed { transform: translateX(100%); }
+
+        /* --- BOUTONS FLÈCHES --- */
+        .toggle-btn {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 24px;
+            height: 80px;
+            background: rgba(0, 255, 255, 0.1);
+            border: 1px solid #00ffff;
+            color: #00ffff;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.8rem;
+            backdrop-filter: blur(5px);
+            z-index: 20;
+            transition: all 0.3s;
+        }
+        .toggle-btn:hover { background: #00ffff; color: #000; box-shadow: 0 0 15px #00ffff; }
+
+        /* Le bouton gauche collé à droite du panneau gauche */
+        .left-panel .toggle-btn { right: -24px; border-left: none; border-radius: 0 8px 8px 0; }
+        /* Le bouton droit collé à gauche du panneau droit */
+        .right-panel .toggle-btn { left: -24px; border-right: none; border-radius: 8px 0 0 8px; }
+
+        /* --- STYLES INTERNES --- */
+        .widget.transparent { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; margin-bottom: 20px; }
+        .circular-chart { display: block; margin: 0 auto; max-width: 80%; max-height: 140px; overflow: visible; }
+        .circle-bg { fill: none; stroke: #1a1a1a; stroke-width: 2.5; }
+        .circle { fill: none; stroke-width: 2.5; stroke-linecap: round; stroke: #18f0f0bb; filter: drop-shadow(0 0 5px rgba(7, 191, 207, 0.8)); transition: stroke-dasharray 0.5s ease; }
+        .percentage { fill: #18f0f0bb; font-family: 'Share Tech Mono', monospace; font-weight: bold; font-size: 0.5rem; text-anchor: middle; dominant-baseline: middle }
+
+        .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+        .data-box { background: rgba(255, 255, 255, 0.05); border-left: 2px solid #333; padding: 8px 5px; display: flex; flex-direction: column; justify-content: center; }
+        .data-box.accent { border-left-color: #00ffff; } .data-box.warning { border-left-color: #ffaa00; }
+        .data-label { font-size: 0.65rem; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 2px; }
+        .data-val { font-family: 'Share Tech Mono'; font-size: 1.1rem; color: #fff; font-weight: bold; }
+
+        /* --- REMPLACE CE BLOC DANS LE CSS --- */
+        #unit-list { 
+            display: flex; 
+            flex-direction: column; 
+            gap: 8px; 
+            /* Hauteur max dynamique : 50% de la hauteur d'écran */
+            max-height: 50vh; 
+            overflow-y: auto; /* Active le scroll */
+            padding-right: 5px; 
+            margin-bottom: 20px; 
+        }
+
+        /* Style de la barre de défilement (Scrollbar) */
+        #unit-list::-webkit-scrollbar { width: 5px; } 
+        #unit-list::-webkit-scrollbar-track { background: rgba(0,0,0,0.3); }
+        #unit-list::-webkit-scrollbar-thumb { background: #00ffff; border-radius: 2px; }
+        #unit-list::-webkit-scrollbar-thumb:hover { background: #fff; }
+
+        .bot-card { background: linear-gradient(90deg, rgba(0,20,30,0.8) 0%, rgba(0,0,0,0.5) 100%); border: 1px solid rgba(0, 255, 255, 0.1); border-left: 3px solid #444; padding: 8px 10px; font-family: 'Share Tech Mono'; transition: all 0.2s; position: relative; }
+        .bot-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .bot-id { color: #fff; font-weight: bold; font-size: 0.95rem; }
+        .bot-badge { font-size: 0.6rem; padding: 2px 6px; border-radius: 2px; background: #111; border: 1px solid #333; }
+        .bfs-mode { color: #00aaff; border-color: #00aaff; } .dqn-mode { color: #cc00ff; border-color: #cc00ff; } .rtb-mode { color: #ffaa00; border-color: #ffaa00; }
+        .bot-details { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: #aaa; }
+        .bot-batt-wrapper { width: 60px; height: 4px; background: #222; margin-left: 10px; position: relative; }
+        .bot-batt-level { height: 100%; background: #00ff00; box-shadow: 0 0 5px #00ff00; transition: width 0.3s; }
+
+        .telemetry-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .telemetry-box { background: rgba(0, 255, 255, 0.05); border: 1px solid rgba(0, 255, 255, 0.2); padding: 10px; border-radius: 4px; text-align: center; }
+        .tele-label { font-size: 0.7rem; color: #888; margin-bottom: 5px; } .tele-val { font-size: 1.2rem; font-weight: bold; color: #fff; font-family: 'Share Tech Mono'; }
+
+        .widget.log-box { background: #050505; border: 1px solid #333; font-family: 'Courier New', Courier, monospace; padding: 10px; }
+        .log-entry { font-size: 0.75rem; margin-bottom: 4px; border-bottom: 1px solid #111; padding-bottom: 2px; }
+        .log-time { color: #555; margin-right: 5px; } .log-msg { color: #00ff00; }
+
+        .end-stats-container { display: flex; gap: 40px; margin: 20px 0; text-align: center; justify-content: center; }
+        .end-stat-box { background: rgba(255, 255, 255, 0.1); padding: 15px; border-radius: 8px; border: 1px solid #333; min-width: 120px; }
+        .end-stat-label { font-size: 0.8rem; color: #aaa; letter-spacing: 1px; }
+        .end-stat-val { font-size: 1.8rem; font-weight: bold; color: #fff; font-family: 'Share Tech Mono'; }
+        .modal-btn-group { display: flex; gap: 20px; margin-top: 20px; justify-content: center; }
+        .btn-return { padding: 15px 30px; background: transparent; border: 2px solid #00ff00; color: #00ff00; font-size: 1.2rem; cursor: pointer; font-family: 'Rajdhani', sans-serif; transition: 0.3s; }
+        .btn-return:hover { background: #00ff00; color: black; }
+        .btn-stay { padding: 15px 30px; background: transparent; border: 2px solid #555; color: #ccc; font-size: 1.2rem; cursor: pointer; font-family: 'Rajdhani', sans-serif; transition: 0.3s; }
+        .btn-stay:hover { border-color: #fff; color: white; }
+    </style>
+</head>
+<body>
+
+    <!-- GAUCHE -->
+    <div class="sidebar left-panel" id="left-panel">
+        <div class="toggle-btn" onclick="toggleLeft()">◀</div>
+        
+        <div class="header"><h1>SWARM <span>COMMAND</span></h1><div class="status-dot"></div></div>
+        
+        <div class="widget transparent">
+            <div class="gauge-container">
+                <svg viewBox="0 0 36 36" class="circular-chart">
+                    <defs>
+                        <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#00ffff" />
+                            <stop offset="100%" stop-color="#0088ff" />
+                        </linearGradient>
+                    </defs>
+                    
+                    <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                    <path class="circle-outer" d="M18 1 a 17 17 0 0 1 0 34 a 17 17 0 0 1 0 -34" />
+                    <path class="circle" id="cov-circle" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" />
+                    
+                    <!-- Texte centré exactement en 18, 18 -->
+                    <text x="18" y="18" class="percentage" id="cov-text">0%</text>
+                </svg>
+            </div>
+        </div>
+
+        <div class="widget">
+            <h3>MISSION DATA</h3>
+            <div class="data-grid">
+                <div class="data-box accent">
+                    <div class="data-label">TIME STEP</div>
+                    <div class="data-val" id="step-val">0</div>
+                </div>
+                <div class="data-box warning">
+                    <div class="data-label">REDUNDANCY</div>
+                    <div class="data-val" id="red-val">0</div>
+                </div>
+                <div class="data-box">
+                    <div class="data-label">TIME (SEC)</div>
+                    <div class="data-val" id="time-val">00:00</div>
+                </div>
+                <div class="data-box">
+                    <div class="data-label">EFFICIENCY</div>
+                    <div class="data-val" id="eff-metric">0.0</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="widget"><h3>ACTIVE UNITS</h3><div id="unit-list"></div></div>
+        <a href="/" style="text-decoration:none;"><button class="btn-reset">NEW CONFIGURATION</button></a>
+    </div>
+
+    <!-- CENTRE -->
+    <div id="viewport"><div id="collision-alert">⚠ COLLISION DETECTED</div></div>
+
+    <!-- DROITE -->
+    <div class="sidebar right-panel" id="right-panel">
+        <div class="toggle-btn" onclick="toggleRight()">▶</div>
+
+        <div class="widget" style="padding-top:20px;">
+            <h3>SWARM TELEMETRY</h3>
+            <div class="telemetry-grid">
+                <div class="telemetry-box"><div class="tele-label">AVG BATTERY</div><div class="tele-val" id="avg-batt" style="color:#00ff00">100%</div></div>
+                <div class="telemetry-box"><div class="tele-label">EFFICIENCY</div><div class="tele-val" id="eff-val">0.0</div></div>
+            </div>
+            <div class="tele-label">GLOBAL ENERGY LEVEL</div>
+            <div class="batt-track" style="height: 6px; margin-top:5px;"><div class="batt-fill" id="global-batt-bar" style="width: 100%; background: linear-gradient(90deg, #00ff00, #ffff00);"></div></div>
+        </div>
+
+        <div class="widget"><h3>PERFORMANCE GRAPH</h3><div class="chart-container"><canvas id="perfChart"></canvas></div></div>
+        <div class="widget log-box"><h3>TERMINAL LOGS</h3><div id="logs"><div class="log-entry"><span class="log-time">[00:00]</span> <span class="log-msg">System Initialized...</span></div></div></div>
+    </div>
+
+    <!-- MODAL DE FIN PREMIUM -->
+    <div id="victory-modal">
+        <div class="victory-card">
+            <h1 id="end-title">MISSION COMPLETE</h1>
+            <p id="end-reason">Target Reached</p>
+            
+            <div class="end-stats-container">
+                <div class="end-stat-box">
+                    <div class="end-stat-label">FINAL COVERAGE</div>
+                    <div class="end-stat-val" id="final-cov">0%</div>
+                </div>
+                <div class="end-stat-box">
+                    <div class="end-stat-label">TOTAL REDUNDANCY</div>
+                    <div class="end-stat-val" id="final-red">0</div>
+                </div>
+            </div>
+
+            <div class="modal-btn-group">
+                <button class="btn-modal btn-menu" onclick="window.location.href='/'">NEW CONFIGURATION</button>
+                <button class="btn-modal btn-stay" onclick="closeModal()">STAY & ANALYZE</button>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const GRID_SIZE = Number("{{ config.GRID_SIZE }}");
+
+    let scene, camera, renderer, controls;
+    let robotMeshes = {};
+    let obstacleMesh;
+    const dummy = new THREE.Object3D();
+    let obstacleCount = 0;
+    let simInterval;
+    let baseStationCreated = false;
+    let baseCrystal = null; 
+    let starField;
+    let lastCoverage = 0;
+    let startTime = Date.now();
+
+    // --- TOGGLE PANELS ---
+    function toggleLeft() {
+        const panel = document.getElementById('left-panel');
+        const btn = panel.querySelector('.toggle-btn');
+        panel.classList.toggle('closed');
+        btn.innerText = panel.classList.contains('closed') ? "▶" : "◀";
+        setTimeout(() => onresize(), 450);
+    }
+
+    function toggleRight() {
+        const panel = document.getElementById('right-panel');
+        const btn = panel.querySelector('.toggle-btn');
+        panel.classList.toggle('closed');
+        btn.innerText = panel.classList.contains('closed') ? "◀" : "▶";
+        setTimeout(() => onresize(), 450);
+    }
+
+    const ctx = document.getElementById('perfChart').getContext('2d');
+    /* --- REMPLACE LA DÉFINITION DU CHART PAR CELLE-CI --- */
+    const perfChart = new Chart(ctx, {
+        type: 'line',
+        data: { 
+            labels: [], 
+            datasets: [
+                { 
+                    label: 'Coverage (%)', // Légende 1
+                    data: [], 
+                    borderColor: '#00ffff', 
+                    borderWidth: 2, 
+                    pointRadius: 0, 
+                    yAxisID: 'y' 
+                }, 
+                { 
+                    label: 'Redundancy', // Légende 2
+                    data: [], 
+                    borderColor: '#ff0033', 
+                    borderWidth: 2, 
+                    pointRadius: 0, 
+                    borderDash: [2,2], 
+                    yAxisID: 'y1' 
+                }
+            ] 
+        },
+        options: { 
+            responsive: true, 
+            maintainAspectRatio: false, 
+            animation: false, 
+            scales: { 
+                x: { display: false }, 
+                y: { type:'linear', display:true, position:'left', min:0, max:100, grid:{color:'#222'} }, 
+                y1: { type:'linear', display:true, position:'right', grid:{drawOnChartArea:false} } 
+            }, 
+            plugins: { 
+                legend: {
+                    display: true, // <--- C'EST ICI QUE CA SE PASSE
+                    labels: {
+                        color: '#aaaaaa', // Couleur du texte
+                        font: {
+                            family: "'Share Tech Mono', monospace", // Police du dashboard
+                            size: 10
+                        },
+                        boxWidth: 10,
+                        padding: 10
+                    }
+                } 
+            } 
+        }
+    });
+
+    try {
+        init3D(); animate(); startSimulation();
+        addLog("Grid configuration loaded: " + GRID_SIZE + "x" + GRID_SIZE);
+    } catch (e) { console.error("Critical Init Error:", e); }
+
+    function closeModal() { document.getElementById('victory-modal').style.display = 'none'; }
+
+    function addLog(message) {
+        const logContainer = document.getElementById('logs');
+        const sec = Math.floor((Date.now() - startTime) / 1000);
+        const timeStr = `[${Math.floor(sec/60).toString().padStart(2,'0')}:${(sec%60).toString().padStart(2,'0')}]`;
+        const entry = document.createElement('div');
+        entry.className = 'log-entry';
+        entry.innerHTML = `<span class="log-time">${timeStr}</span> <span class="log-msg">${message}</span>`;
+        logContainer.appendChild(entry);
+        logContainer.scrollTop = logContainer.scrollHeight;
+    }
+
+    function init3D() {
+        const container = document.getElementById('viewport');
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x020205);
+        scene.fog = new THREE.Fog(0x020205, GRID_SIZE*2, GRID_SIZE*12);
+
+        camera = new THREE.PerspectiveCamera(45, container.clientWidth/container.clientHeight, 0.1, 10000);
+        camera.position.set(0, GRID_SIZE*1.5, GRID_SIZE*1.2);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const mapCenter = (GRID_SIZE - 1) / 2;
+
+        // STARS
+        const starGeo = new THREE.BufferGeometry();
+        const starCount = 6000;
+        const starPos = new Float32Array(starCount * 3);
+        for(let i=0; i<starCount*3; i++) starPos[i] = (Math.random() - 0.5) * (GRID_SIZE * 10);
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+        starField = new THREE.Points(starGeo, new THREE.PointsMaterial({color: 0xffffff, size: 0.5, transparent: true, opacity: 0.8}));
+        starField.position.set(mapCenter, 0, mapCenter);
+        scene.add(starField);
+
+        const floorGeo = new THREE.PlaneGeometry(GRID_SIZE, GRID_SIZE);
+        const floorMat = new THREE.MeshStandardMaterial({ color: 0x080808, roughness: 0.8, metalness: 0.2 });
+        const floor = new THREE.Mesh(floorGeo, floorMat);
+        floor.rotation.x = -Math.PI/2;
+        floor.position.set(mapCenter, -0.1, mapCenter);
+        floor.receiveShadow = true;
+        scene.add(floor);
+
+        const grid = new THREE.GridHelper(GRID_SIZE, GRID_SIZE, 0x333333, 0x111111);
+        grid.position.set(mapCenter, 0, mapCenter);
+        grid.material.opacity = 0.3;
+        grid.material.transparent = true;
+        scene.add(grid);
+
+        const sun = new THREE.DirectionalLight(0xffffff, 1);
+        sun.position.set(20, 50, 20);
+        sun.castShadow = true;
+        sun.shadow.mapSize.width = 2048; sun.shadow.mapSize.height = 2048;
+        const d = GRID_SIZE * 1.5;
+        sun.shadow.camera.left = -d; sun.shadow.camera.right = d;
+        sun.shadow.camera.top = d; sun.shadow.camera.bottom = -d;
+        scene.add(sun);
+        scene.add(new THREE.AmbientLight(0x404040));
+
+        const boxGeo = new THREE.BoxGeometry(0.95, 1, 0.95);
+        const boxMat = new THREE.MeshStandardMaterial({ color: 0xff0033, roughness: 0.3, metalness: 0.4 });
+        obstacleMesh = new THREE.InstancedMesh(boxGeo, boxMat, GRID_SIZE*GRID_SIZE);
+        obstacleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+        obstacleMesh.castShadow = true;
+        obstacleMesh.receiveShadow = true;
+        scene.add(obstacleMesh);
+
+        createWalls(mapCenter);
+
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.target.set(mapCenter, 0, mapCenter);
+        controls.maxPolarAngle = Math.PI/2.1; 
+    }
+
+    function createWalls(center) {
+        const h = 1.5; const thick = 0.4;
+        const len = Number(GRID_SIZE) + Number(thick); 
+        const offset = Number(GRID_SIZE) / 2;
+        const mat = new THREE.MeshPhongMaterial({ color: 0x00ffff, transparent: true, opacity: 0.6, emissive: 0x004444, shininess: 100 });
+
+        const geoH = new THREE.BoxGeometry(len, h, thick);
+        const wN = new THREE.Mesh(geoH, mat); wN.position.set(center, h/2, center - offset - thick/2); scene.add(wN);
+        const wS = new THREE.Mesh(geoH, mat); wS.position.set(center, h/2, center + offset + thick/2); scene.add(wS);
+        const geoV = new THREE.BoxGeometry(thick, h, len);
+        const wW = new THREE.Mesh(geoV, mat); wW.position.set(center - offset - thick/2, h/2, center); scene.add(wW);
+        const wE = new THREE.Mesh(geoV, mat); wE.position.set(center + offset + thick/2, h/2, center); scene.add(wE);
+    }
+
+    function createBaseStation(x, y) {
+        if(baseStationCreated) return;
+        const group = new THREE.Group();
+        const baseGeo = new THREE.CylinderGeometry(1.8, 2, 0.3, 6);
+        const baseMat = new THREE.MeshStandardMaterial({ color: 0x222222, metalness: 0.8, roughness: 0.2 });
+        const base = new THREE.Mesh(baseGeo, baseMat); base.position.y = 0.15; base.castShadow = true; base.receiveShadow = true; group.add(base);
+        const ringGeo = new THREE.TorusGeometry(1.2, 0.05, 16, 32);
+        const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+        const ring = new THREE.Mesh(ringGeo, ringMat); ring.rotation.x = -Math.PI / 2; ring.position.y = 0.31; group.add(ring);
+        const pillarGeo = new THREE.BoxGeometry(0.4, 1.2, 0.4); const pillarMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+        [[1,1], [1,-1], [-1,1], [-1,-1]].forEach(p => {
+            const pillar = new THREE.Mesh(pillarGeo, pillarMat); pillar.position.set(p[0]*0.8, 0.6, p[1]*0.8);
+            const lightTip = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.2), new THREE.MeshBasicMaterial({color: 0x00ff00})); lightTip.position.y = 0.6; pillar.add(lightTip); group.add(pillar);
+        });
+        const crystalGeo = new THREE.IcosahedronGeometry(0.5, 0);
+        const crystalMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true, transparent: true, opacity: 0.8 });
+        baseCrystal = new THREE.Mesh(crystalGeo, crystalMat); baseCrystal.position.y = 1.5; group.add(baseCrystal);
+        const light = new THREE.PointLight(0x00ff00, 2, 8); light.position.set(0, 2, 0); group.add(light);
+        group.position.set(x, 0, y); scene.add(group); baseStationCreated = true;
+    }
+
+    function createRobot(id) {
+        const group = new THREE.Group();
+        const col = [0x00ffff, 0xff00ff, 0xffff00, 0x00ff00][id%4];
+        
+        // Robot Plus Petit (Correction Clipping)
+        const body = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.25, 0.6), new THREE.MeshStandardMaterial({color: 0x222222}));
+        body.position.y = 0.25; body.castShadow = true; group.add(body);
+        
+        const head = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.15, 0.25), new THREE.MeshBasicMaterial({color: col}));
+        head.position.set(0, 0.45, 0); group.add(head);
+
+        const wGeo = new THREE.CylinderGeometry(0.1, 0.1, 0.1, 16); const wMat = new THREE.MeshStandardMaterial({color:0x111111}); wGeo.rotateZ(Math.PI/2);
+        [[-0.25,0.15], [0.25,0.15], [-0.25,-0.15], [0.25,-0.15]].forEach(p => {
+            const w = new THREE.Mesh(wGeo, wMat);
+            w.position.set(p[0], 0.12, p[1]);
+            group.add(w);
+        });
+        scene.add(group); return group;
+    }
+
+    function startSimulation() {
+        simInterval = setInterval(async () => {
+            try {
+                const res = await fetch('/step');
+                const data = await res.json();
+
+                if(data.status === 'COMPLETE') {
+                    clearInterval(simInterval);
+                    document.getElementById('end-reason').innerText = data.reason;
+                    
+                    // Récupération et Arrondi (2 chiffres après la virgule)
+                    let rawCov = data.stats ? data.stats.coverage : 0;
+                    let finalCov = Number(rawCov).toFixed(2); // <--- C'EST ICI LA CORRECTION
+                    
+                    const finalRed = (data.stats && data.stats.redundancy !== undefined) ? data.stats.redundancy : document.getElementById('red-val').innerText;
+
+                    document.getElementById('final-cov').innerText = finalCov + '%';
+                    document.getElementById('final-red').innerText = finalRed;
+
+                    document.getElementById('victory-modal').style.display = 'flex';
+                    addLog("MISSION COMPLETE: " + data.reason);
+                    return;
+                }
+
+                document.getElementById('cov-circle').setAttribute('stroke-dasharray', `${data.stats.coverage}, 100`);
+                document.getElementById('cov-text').textContent = Math.round(data.stats.coverage) + '%';
+                
+                document.getElementById('step-val').innerText = data.stats.step;
+                document.getElementById('red-val').innerText = data.stats.redundancy;
+                
+                const sec = Math.floor((Date.now() - startTime) / 1000);
+                document.getElementById('time-val').innerText = `${Math.floor(sec/60).toString().padStart(2,'0')}:${(sec%60).toString().padStart(2,'0')}`;
+                
+                let eff = 0; if (data.stats.coverage > lastCoverage) eff = (data.stats.coverage - lastCoverage).toFixed(2);
+                lastCoverage = data.stats.coverage;
+                document.getElementById('eff-metric').innerText = eff;
+
+                let totalBatt = 0;
+                let activeCount = 0;
+                data.robots.forEach(r => { totalBatt += (r.battery / r.max_battery) * 100; activeCount++; });
+                const avgBatt = activeCount > 0 ? Math.round(totalBatt / activeCount) : 0;
+                document.getElementById('avg-batt').innerText = avgBatt + "%";
+                document.getElementById('global-batt-bar').style.width = avgBatt + "%";
+                document.getElementById('global-batt-bar').style.background = avgBatt > 50 ? 'linear-gradient(90deg, #00ff00, #ffff00)' : 'linear-gradient(90deg, #ff0000, #ff8800)';
+                document.getElementById('eff-val').innerText = "+" + eff + "%";
+
+                if(data.base) createBaseStation(data.base.x, data.base.y);
+
+                if(data.graph.steps.length > 0) {
+                    perfChart.data.labels = data.graph.steps;
+                    perfChart.data.datasets[0].data = data.graph.coverage;
+                    perfChart.data.datasets[1].data = data.graph.redundancy;
+                    perfChart.update('none');
+                }
+
+                const list = document.getElementById('unit-list'); list.innerHTML = '';
+                let anyCollision = false;
+
+                data.robots.forEach(r => {
+                    if(!robotMeshes[r.id]) robotMeshes[r.id] = createRobot(r.id);
+                    const mesh = robotMeshes[r.id];
+                    const target = new THREE.Vector3(r.x, 0, r.y);
+                    mesh.position.lerp(target, 0.3);
+                    mesh.lookAt(target);
+
+                    if (r.collision) {
+                        anyCollision = true; mesh.children[1].material.color.setHex(0xff0000); mesh.scale.set(1, 1, 1);
+                        addLog(`WARNING: Unit ${r.id} Collision Detected!`);
+                    } else {
+                        const normalCol = [0x00ffff, 0xff00ff, 0xffff00, 0x00ff00][r.id%4]; mesh.children[1].material.color.setHex(normalCol); mesh.scale.set(1, 1, 1);
+                    }
+
+                    const battPct = (r.battery / r.max_battery) * 100;
+                    const segments = 10;
+                    let battHtml = '';
+                    for(let i=0; i<segments; i++) {
+                        let cls = 'batt-segment';
+                        if (i < (battPct/10)) cls += (battPct < 20 ? ' low' : ' active');
+                        battHtml += `<div class="${cls}"></div>`;
+                    }
+                    const modeClass = r.mode.includes("BFS") ? "bfs-mode" : (r.mode.includes("RTB") ? "rtb-mode" : "dqn-mode");
+                    const borderColor = ['#00ffff', '#ff00ff', '#ffff00', '#00ff00'][r.id%4];
+
+                    const d = document.createElement('div'); d.className = 'bot-card';
+                    d.style.borderLeftColor = borderColor;
+                    d.innerHTML = `
+                        <div class="bot-header">
+                            <div class="bot-id" style="color:${borderColor}">UNIT-${r.id}</div>
+                            <div class="bot-badge ${modeClass}">${r.mode}</div>
+                        </div>
+                        <div class="bot-details">
+                            <div>LOC: <span style="color:#fff">${r.x}, ${r.y}</span></div>
+                            <div style="display:flex; align-items:center;">
+                                <span>PWR</span>
+                                <div class="bot-batt-wrapper">
+                                    <div class="bot-batt-level" style="width:${battPct}%; background:${battPct<20?'red':'#00ff00'}"></div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                    list.appendChild(d);
+                });
+
+                const alertBox = document.getElementById('collision-alert');
+                if(anyCollision) { alertBox.style.opacity = 1; alertBox.style.transform = "translateX(-50%) scale(1.1)"; } 
+                else { alertBox.style.opacity = 0; alertBox.style.transform = "translateX(-50%) scale(1)"; }
+
+                data.new_blocks.forEach(b => {
+                    if(b.type === 2) { dummy.position.set(b.x, 0.5, b.y); dummy.updateMatrix(); obstacleMesh.setMatrixAt(obstacleCount++, dummy.matrix); }
+                });
+                if(data.new_blocks.length > 0) obstacleMesh.instanceMatrix.needsUpdate = true;
+
+            } catch(e) { console.error("Sim Error:", e); }
+
+        }, 100);
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        if (baseCrystal) { baseCrystal.rotation.y += 0.02; baseCrystal.rotation.z += 0.01; baseCrystal.position.y = 1.5 + Math.sin(Date.now() * 0.002) * 0.2; }
+        if (starField) { starField.rotation.y += 0.0005; }
+        renderer.render(scene, camera);
+    }
+    
+    window.onresize = () => {
+        camera.aspect = document.getElementById('viewport').clientWidth / document.getElementById('viewport').clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(document.getElementById('viewport').clientWidth, document.getElementById('viewport').clientHeight);
+    }
+</script>
+</body>
+</html>

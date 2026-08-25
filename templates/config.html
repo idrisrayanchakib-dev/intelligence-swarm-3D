@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SYSTEM INITIALIZATION</title>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        /* --- CORE --- */
+        :root {
+            --primary: #00f3ff;
+            --secondary: #0078ff;
+            --bg: #050508;
+            --glass: rgba(10, 20, 30, 0.7);
+            --border: rgba(0, 243, 255, 0.3);
+            --glow: 0 0 10px rgba(0, 243, 255, 0.5);
+        }
+
+        body {
+            margin: 0;
+            height: 100vh;
+            background-color: var(--bg);
+            color: white;
+            font-family: 'Share Tech Mono', monospace;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* --- BACKGROUND GRID (Perspective) --- */
+        .grid-bg {
+            position: absolute;
+            width: 200%; height: 200%;
+            background-image: 
+                linear-gradient(transparent 95%, var(--primary) 95%),
+                linear-gradient(90deg, transparent 95%, var(--primary) 95%);
+            background-size: 60px 60px;
+            opacity: 0.08;
+            transform: perspective(500px) rotateX(60deg) translateY(-100px) translateZ(-200px);
+            animation: gridMove 10s linear infinite;
+            z-index: 0;
+        }
+
+        @keyframes gridMove {
+            0% { transform: perspective(500px) rotateX(60deg) translateY(0) translateZ(-200px); }
+            100% { transform: perspective(500px) rotateX(60deg) translateY(60px) translateZ(-200px); }
+        }
+
+        /* --- VIGNETTE & SCANLINES --- */
+        body::after {
+            content: "";
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: radial-gradient(circle, transparent 40%, black 100%);
+            z-index: 1;
+            pointer-events: none;
+        }
+
+        /* --- MAIN CONTAINER --- */
+        .container {
+            display: flex;
+            z-index: 10;
+            gap: 60px;
+            align-items: center;
+            width: 1000px;
+            max-width: 95%;
+        }
+
+        /* --- CSS ROBOT (LEFT SIDE) --- */
+        .robot-container {
+            width: 320px;
+            height: 420px;
+            position: relative;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            animation: float 6s ease-in-out infinite;
+        }
+
+        /* Construction du Robot en CSS pur */
+        .bot-head {
+            width: 180px;
+            height: 220px;
+            background: linear-gradient(135deg, #1a1a20, #0a0a10);
+            border: 2px solid var(--primary);
+            border-radius: 20px 20px 60px 60px;
+            position: relative;
+            box-shadow: var(--glow), inset 0 0 20px rgba(0, 243, 255, 0.1);
+        }
+
+        .bot-eye-visor {
+            position: absolute;
+            top: 60px; left: 15px; right: 15px;
+            height: 45px;
+            background: #000;
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid #333;
+            box-shadow: inset 0 0 10px #000;
+        }
+
+        .bot-eye {
+            width: 60px; height: 12px;
+            background: var(--primary);
+            box-shadow: 0 0 20px var(--primary);
+            position: absolute;
+            top: 16px; left: 60px;
+            border-radius: 2px;
+            animation: scanEye 4s infinite alternate ease-in-out;
+        }
+
+        .bot-antenna {
+            position: absolute;
+            top: -35px; right: 25px;
+            width: 4px; height: 35px;
+            background: var(--secondary);
+            box-shadow: 0 0 5px var(--secondary);
+        }
+        .bot-antenna::after {
+            content: "";
+            position: absolute;
+            top: -6px; left: -3px;
+            width: 10px; height: 10px;
+            background: var(--primary);
+            border-radius: 50%;
+            box-shadow: 0 0 15px var(--primary);
+            animation: blink 2s infinite;
+        }
+
+        .bot-jaw {
+            position: absolute;
+            bottom: 25px; left: 45px; right: 45px;
+            height: 4px;
+            background: #333;
+            box-shadow: 0 6px 0 #333, 0 12px 0 #333;
+        }
+
+        /* Cercles Holographiques autour du robot */
+        .holo-circle {
+            position: absolute;
+            border: 1px solid rgba(0, 243, 255, 0.2);
+            border-radius: 50%;
+            width: 280px; height: 280px;
+            opacity: 0.5;
+            animation: spin 15s linear infinite;
+            box-shadow: 0 0 15px rgba(0, 243, 255, 0.1);
+        }
+        .holo-circle::before {
+            content: "";
+            position: absolute; top: -5px; left: 50%; width: 10px; height: 10px;
+            background: var(--primary); box-shadow: 0 0 15px var(--primary);
+            border-radius: 50%;
+        }
+
+        /* --- CONFIG FORM (RIGHT SIDE) --- */
+        .config-panel {
+            flex: 1;
+            background: rgba(10, 15, 25, 0.85);
+            backdrop-filter: blur(15px);
+            padding: 30px 45px;
+            border: 1px solid rgba(0, 243, 255, 0.2);
+            border-left: 4px solid var(--primary);
+            box-shadow: 0 0 60px rgba(0,0,0,0.6);
+            position: relative;
+            clip-path: polygon(30px 0, 100% 0, 100% calc(100% - 30px), calc(100% - 30px) 100%, 0 100%, 0 30px);
+        }
+
+        .config-panel::before {
+            content: "SYSTEM_CONFIG // 2025 // SECURE LINK";
+            position: absolute;
+            top: -30px; left: 0;
+            font-size: 0.75rem;
+            color: var(--primary);
+            letter-spacing: 3px;
+            opacity: 0.8;
+        }
+
+        h1 {
+            font-family: 'Orbitron', sans-serif;
+            margin: 0 0 20px 0;
+            color: white;
+            font-size: 2.2rem;
+            text-transform: uppercase;
+            text-shadow: 0 0 15px var(--primary);
+            letter-spacing: 2px;
+            border-bottom: 1px solid rgba(0, 243, 255, 0.2);
+            padding-bottom: 15px;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+            position: relative;
+        }
+
+        label {
+            display: block;
+            color: #a0b0c0;
+            font-size: 0.85rem;
+            margin-bottom: 8px;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+
+        input {
+            width: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid #333;
+            color: var(--primary);
+            padding: 15px 18px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 1.2rem;
+            box-sizing: border-box;
+            transition: all 0.3s ease;
+            border-radius: 2px;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--primary);
+            background: rgba(0, 243, 255, 0.08);
+            box-shadow: 0 0 20px rgba(0, 243, 255, 0.15);
+            color: white;
+        }
+
+        /* Style spécifique pour les inputs numériques (cacher les flèches par défaut si désiré) */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { 
+             -webkit-appearance: none; 
+             margin: 0; 
+        }
+
+        button {
+            width: 100%;
+            padding: 15px;
+            margin-top: 15px;
+            background: linear-gradient(90deg, var(--secondary), var(--primary));
+            color: black;
+            font-family: 'Orbitron', sans-serif;
+            font-weight: 800;
+            font-size: 1.2rem;
+            border: none;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 10px var(--primary);
+        }
+
+        button::before {
+            content: "";
+            position: absolute;
+            top: 0; left: -100%;
+            width: 100%; height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+            transition: 0.5s;
+        }
+
+        button:hover::before {
+            left: 100%;
+        }
+
+        button:hover {
+            box-shadow: 0 0 30px var(--primary);
+            transform: translateY(-3px);
+            color: #000;
+        }
+
+        /* --- ANIMATIONS --- */
+        @keyframes scanEye {
+            0% { left: 15px; width: 40px; }
+            50% { left: 110px; width: 40px; }
+            100% { left: 15px; width: 40px; }
+        }
+        @keyframes blink { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(0.8); } }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    </style>
+</head>
+<body>
+
+    <!-- GRILLE DE FOND -->
+    <div class="grid-bg"></div>
+
+    <div class="container">
+        
+        <!-- PARTIE GAUCHE : LE ROBOT CSS -->
+        <div class="robot-container">
+            <div class="holo-circle"></div>
+            <div class="bot-head">
+                <div class="bot-antenna"></div>
+                <div class="bot-eye-visor">
+                    <div class="bot-eye"></div>
+                </div>
+                <div class="bot-jaw"></div>
+                <!-- Détails tech -->
+                <div style="position: absolute; bottom: 15px; right: 15px; font-size: 10px; color: var(--primary); letter-spacing: 1px;">UNIT MK-IV</div>
+                <div style="position: absolute; top: 15px; left: 15px; width: 40px; height: 3px; background: #333;"></div>
+                <div style="position: absolute; top: 22px; left: 15px; width: 20px; height: 3px; background: #333;"></div>
+            </div>
+        </div>
+
+        <!-- PARTIE DROITE : LE FORMULAIRE -->
+        <div class="config-panel">
+            <h1>Mission Parameters</h1>
+            <form method="POST">
+                <div class="input-group">
+                    <label>Grid Dimensions (Size)</label>
+                    <input type="number" name="grid_size" value="30" min="10" max="500">
+                </div>
+                
+                <div class="input-group">
+                    <label>Obstacle Density (0.1 - 0.9)</label>
+                    <input type="number" name="density" value="0.2" step="0.1" min="0" max="0.9">
+                </div>
+                
+                <div class="input-group">
+                    <label>Swarm Units (Robots)</label>
+                    <input type="number" name="num_robots" value="4" min="1" max="20">
+                </div>
+                
+                <div class="input-group">
+                    <label>Unit Capacity (Battery)</label>
+                    <input type="number" name="battery" value="1000" min="100">
+                </div>
+
+                <button type="submit">Initialize Core</button>
+            </form>
+        </div>
+
+    </div>
+
+</body>
+</html>
