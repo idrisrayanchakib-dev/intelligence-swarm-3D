@@ -245,6 +245,9 @@
     let starField;
     let lastCoverage = 0;
     let startTime = Date.now();
+    let frameQueue = [];
+    let fetching = false;
+    let simulationRunning = false;
 
     // --- TOGGLE PANELS ---
     function toggleLeft() {
@@ -454,9 +457,7 @@
         scene.add(group); return group;
     }
 
-    let frameQueue = [];
-    let fetching = false;
-    let simulationRunning = false;
+
 
     async function fetchBatch() {
         if (fetching) return;

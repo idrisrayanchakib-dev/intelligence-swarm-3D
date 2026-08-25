@@ -298,7 +298,7 @@ class Robot:
                      self.env.knowledge_grid[x_min:x_max, y_min:y_max, 0])
         
         # 3. On note ce qui a changé pour le renvoyer à l'interface WEB
-        changes = np.where(self.env.knowledge_grid[x_min:x_max, y_min:y_max] != old_view)
+        changes = np.where(self.env.knowledge_grid[x_min:x_max, y_min:y_max, 0] != old_view)
         if len(changes[0]) > 0:
             self.env.map_changed_this_step = True
             for i in range(len(changes[0])):
