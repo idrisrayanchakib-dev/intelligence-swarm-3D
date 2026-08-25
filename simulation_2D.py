@@ -245,6 +245,7 @@ class Robot:
         self.next_pos_intention = None
         self.current_mode = "IDLE" # Pour l'affichage (BFS ou DQN)
         self.last_collision = False 
+        self.stuck_cnt = 0
         
         # Le robot possède son propre cerveau (Deep Q-Network)
         self.brain = Brain(7, 4)
@@ -364,14 +365,23 @@ class Robot:
             return
 
         dist_to_base = abs(self.pos[0] - CHARGING_STATION[0]) + abs(self.pos[1] - CHARGING_STATION[1])
-        if dist_to_base <= 1: self.battery = CONFIG['BATTERY']
+        
+        # BUG FIX: Recharge AND immediately clear RETURNING state so robot doesn't waste
+        # another step heading to base with a full battery.
+        if dist_to_base <= 1:
+            self.battery = CONFIG['BATTERY']
+            self.state = 'EXPLORING'
+            self.target = None  # Pick a new frontier
 
         # --- CORRECTION 2 : MARGE DE SÉCURITÉ DYNAMIQUE ---
         dist = self.env.base_distances.get((int(self.pos[0]), int(self.pos[1])), float('inf'))
         if dist == float('inf'):
             dist = dist_to_base
             
-        safety_margin = self.env.size * 1.5 
+        # BUG FIX: safety_margin was env.size * 1.5 = 45 steps on a 30x30 grid!
+        # That means robots turn back when they still have 45+ steps of battery left,
+        # wasting exploration time. Use a flat margin of 10 steps instead.
+        safety_margin = 10
         
         if self.battery < (dist + safety_margin) and dist_to_base > 1:
             self.state = 'RETURNING'; self.target = CHARGING_STATION
@@ -419,38 +429,49 @@ class Robot:
     
     def execute_move(self, robots):
         """Exécute le mouvement et entraîne le réseau (Imitation Learning)."""
-        if self.state == 'DEAD': return
-        self.last_collision = False
-        if self.next_pos_intention is not None:
-            nx, ny = int(self.next_pos_intention[0]), int(self.next_pos_intention[1])
+        if self.state == 'DEAD' or self.next_pos_intention is None:
+            self.stuck_cnt += 1
+            if self.stuck_cnt > 3:
+                self.target = None
+                self.stuck_cnt = 0
+            return
             
-            if not (0 <= nx < self.env.size and 0 <= ny < self.env.size): return
+        self.last_collision = False
+        nx, ny, _ = self.next_pos_intention
+        
+        # 1. Vérification des limites du monde
+        if not (0 <= nx < self.env.size and 0 <= ny < self.env.size): return
 
-            # Vérification de collision réelle
-            if self.env.true_grid[nx, ny, 0] == OBSTACLE:
-                # PÉNALITÉ MASSIVE (-1000) : Le robot apprend à ne jamais faire ça
-                self.brain.train(self.last_state, self.last_action, -100)
-                self.target = None 
-                self.last_collision = True
-            else:
-                self.pos = self.next_pos_intention
-                reward = -1
-                t_pos = tuple(self.pos)
-                if t_pos not in self.env.visited_cells: reward = 50 # Récompense Découverte
-                elif t_pos in self.env.visited_cells: reward = -30 # Pénalité Redondance
+        # 2. Vérification des obstacles (Vraie grille)
+        if self.env.true_grid[nx, ny, 0] == OBSTACLE:
+            self.brain.train(self.last_state, self.last_action, -100) # Punition sévère
+            self.target = None 
+            self.last_collision = True
+        else:
+            self.stuck_cnt = 0
+            # 3. Le mouvement est valide
+            self.pos = self.next_pos_intention
+            
+            # 4. Calcul de la récompense locale (DQN)
+            reward = -1 # Coût de déplacement de base (encourage l'efficacité)
+            t_pos = tuple(self.pos)
+            if t_pos not in self.env.visited_cells: reward = 50 # Grande récompense (Découverte)
+            elif t_pos in self.env.visited_cells: reward = -30  # Punition (Redondance)
+            
+            self.env.record_visit(self.pos)
+            self.battery -= 1
+            
+            # Gestion de la batterie faible
+            if self.battery <= 0:
+                self.state = 'DEAD'
+                self.current_mode = "DEAD"
                 
-                self.env.record_visit(self.pos)
-                self.battery -= 1
-                
-                if self.battery <= 0:
-                    self.state = 'DEAD'
-                    self.current_mode = "DEAD"
-                    
-                # Le DQN apprend de ce mouvement (même si c'est le BFS qui l'a choisi)
-                if self.state == 'EXPLORING' and self.last_state is not None:
-                    new_state = self.get_local_state(robots)
-                    target = reward + self.gamma * np.max(self.brain.predict(new_state))
-                    self.brain.train(self.last_state, self.last_action, target)
+            # 5. Apprentissage de l'action passée
+            if self.state == 'EXPLORING' and self.last_state is not None:
+                new_state = self.get_local_state(robots)
+                # Formule de Q-Learning : Q = r + gamma * max(Q_next)
+                target = reward + self.gamma * np.max(self.brain.predict(new_state))
+                self.brain.train(self.last_state, self.last_action, target)
 
 # =============================================================================
 # FONCTIONS : ALLOCATION DE CIBLES (Enchères)
@@ -460,16 +481,15 @@ def get_frontiers(env):
     frontiers = []
     g = env.knowledge_grid
     frees = np.argwhere(g[:,:,0] == FREE)
-    np.random.shuffle(frees)
-    # Échantillonnage pour performance temps réel
-    for i in range(min(len(frees), 200)):
-        x, y = frees[i]
+    # BUG FIX: Scan ALL free cells, not just 200.
+    # With only 200 samples in a large map, we miss huge unexplored regions.
+    for x, y in frees:
         for nx, ny in [(x+1,y), (x-1,y), (x,y+1), (x,y-1)]:
             if 0<=nx<env.size and 0<=ny<env.size:
                 if g[nx,ny,0] == UNKNOWN:
                     frontiers.append(np.array([x,y,0]))
                     break
-    return np.array(frontiers)
+    return np.array(frontiers) if frontiers else np.array([])
 
 def assign_targets(robots, env):
     """
@@ -478,13 +498,24 @@ def assign_targets(robots, env):
     """
     frontiers = get_frontiers(env)
     avail = [r for r in robots if r.state not in ('RETURNING', 'DEAD')]
-    if len(frontiers) == 0: return
+    if len(frontiers) == 0:
+        # BUG FIX: If NO frontiers at all, clear the blacklist - it may have grown
+        # too aggressively from temporary pathfinding failures (e.g. robot in the way).
+        if len(env.unreachable_blacklist) > 0:
+            env.unreachable_blacklist.clear()
+        return
 
-    # Optimisation : On ne prend qu'un sous-ensemble si trop de frontières
-    target_sample = frontiers
-    if len(frontiers) > 60:
-        indices = np.random.choice(len(frontiers), 60, replace=False)
-        target_sample = frontiers[indices]
+    valid_frontiers = [f for f in frontiers if tuple(f) not in env.unreachable_blacklist]
+    if len(valid_frontiers) == 0:
+        # BUG FIX: All frontiers are blacklisted - this means the blacklist is wrong.
+        # Clear it and retry with all frontiers so robots don't just freeze.
+        env.unreachable_blacklist.clear()
+        valid_frontiers = list(frontiers)
+    
+    target_sample = valid_frontiers
+    if len(valid_frontiers) > 60:
+        indices = np.random.choice(len(valid_frontiers), 60, replace=False)
+        target_sample = np.array(valid_frontiers)[indices]
 
     assigned_targets = set()
     for r in robots:
@@ -555,101 +586,109 @@ def simulation():
 
 @app.route('/step')
 def step():
-    """
-    Cœur de la boucle de simulation.
-    Appelée par le navigateur via JavaScript.
-    """
     global env, robots, step_cnt, history, stagnation_cnt, last_cov
     if not env: return jsonify({'status': 'ERROR'})
 
-    cov = env.get_exploration_rate()
+    n_steps = request.args.get('n', default=1, type=int)
+    if n_steps > 30: n_steps = 30 # Cap to prevent server lockup
     
-    # Détection de fin (100% ou Stagnation prolongée)
-    if cov == last_cov: stagnation_cnt += 1
-    else: stagnation_cnt = 0; last_cov = cov
-
-    # Fin de mission
-    if cov >= 99.0 or stagnation_cnt > 300:
-        reason = "Coverage Reached" if cov >= 99.0 else "Limit Reached"
-        return jsonify({'status': 'COMPLETE', 'reason': reason, 'stats': {'coverage': cov, 'step': step_cnt}})
-
-    if env.map_changed_this_step:
-        env.update_base_distances()
-        env.map_changed_this_step = False
-
-    # 1. Perception
-    for r in robots: 
-        if r.state != 'DEAD': r.sense()
-    # 2. Assignation
-    assign_targets(robots, env)
-    # 3. Planification
-    for r in robots: r.plan_next_move(robots)
+    batch = []
     
-    # 4. GESTION DES CONFLITS (Anti-Deadlock)
-    intentions = {}
-    for r in robots:
-        if r.next_pos_intention is not None:
-            k = tuple(r.next_pos_intention)
-            if k not in intentions: intentions[k] = []
-            intentions[k].append(r)
-    
-    # Résolution Conflit dynamique (2 robots, 1 case)
-    for k, candidates in intentions.items():
-        if len(candidates) > 1:
-            winner = random.choice(candidates)
-            for r in candidates:
-                if r != winner: r.next_pos_intention = None # Le perdant attend
-    
-    # Résolution Conflit dynamique (Swapping / Head-to-Head)
-    for i in range(len(robots)):
-        for j in range(i+1, len(robots)):
-            r1, r2 = robots[i], robots[j]
-            if r1.next_pos_intention is not None and r2.next_pos_intention is not None:
-                if tuple(r1.next_pos_intention) == tuple(r2.pos) and tuple(r2.next_pos_intention) == tuple(r1.pos):
-                    if random.choice([True, False]): r1.next_pos_intention = None
-                    else: r2.next_pos_intention = None
-                    
-    # Résolution Conflit statique (Avancer sur un robot immobile)
-    stationary_pos = set()
-    for r in robots:
-        if r.next_pos_intention is None: stationary_pos.add(tuple(r.pos))
-    for r in robots:
-        if r.next_pos_intention is not None:
-            if tuple(r.next_pos_intention) in stationary_pos:
-                r.next_pos_intention = None
-                stationary_pos.add(tuple(r.pos))
+    for _ in range(n_steps):
+        cov = env.get_exploration_rate()
+        
+        # Détection de fin (100% ou Stagnation prolongée)
+        if abs(cov - last_cov) < 0.000001: stagnation_cnt += 1
+        else: stagnation_cnt = 0; last_cov = cov
 
-    # 5. Mouvement
-    for r in robots: r.execute_move(robots)
-    step_cnt += 1
-    
-    # Enregistrement des données graphiques
-    if step_cnt % 5 == 0:
-        history['steps'].append(step_cnt)
-        history['coverage'].append(round(cov, 2))
-        history['redundancy'].append(env.redundancy_score)
+        # Fin de mission
+        if cov >= 99.0 or stagnation_cnt > 1000:
+            reason = "Coverage Reached" if cov >= 99.0 else "Limit Reached"
+            batch.append({'status': 'COMPLETE', 'reason': reason, 'stats': {'coverage': cov, 'step': step_cnt}})
+            return jsonify({'batch': batch})
 
-    new_blocks = env.newly_discovered[:]
-    env.newly_discovered = []
+        if env.map_changed_this_step:
+            env.update_base_distances()
+            env.map_changed_this_step = False
 
-    return jsonify({
-        'status': 'RUNNING',
-        'robots': [{
-            'id': r.id, 
-            'x': int(r.pos[0]), 'y': int(r.pos[1]), 
-            'battery': r.battery, 'max_battery': CONFIG['BATTERY'],
-            'mode': r.current_mode,
-            'collision': r.last_collision
-        } for r in robots],
-        'new_blocks': new_blocks,
-        'stats': {
-            'step': step_cnt, 
-            'coverage': round(cov, 2),
-            'redundancy': env.redundancy_score
-        },
-        'graph': history,
-        'base': {'x': int(CHARGING_STATION[0]), 'y': int(CHARGING_STATION[1])}
-    })
+        # 1. Perception
+        for r in robots: 
+            if r.state != 'DEAD': r.sense()
+        # 2. Assignation
+        assign_targets(robots, env)
+        # 3. Planification
+        for r in robots: r.plan_next_move(robots)
+        
+        # 4. GESTION DES CONFLITS (Anti-Deadlock)
+        intentions = {}
+        for r in robots:
+            if r.next_pos_intention is not None:
+                k = tuple(r.next_pos_intention)
+                if k not in intentions: intentions[k] = []
+                intentions[k].append(r)
+        
+        # Résolution Conflit dynamique (2 robots, 1 case)
+        for k, candidates in intentions.items():
+            if len(candidates) > 1:
+                winner = random.choice(candidates)
+                for r in candidates:
+                    if r != winner: r.next_pos_intention = None # Le perdant attend
+        
+        # Résolution Conflit dynamique (Swapping / Head-to-Head)
+        for i in range(len(robots)):
+            for j in range(i+1, len(robots)):
+                r1, r2 = robots[i], robots[j]
+                if r1.next_pos_intention is not None and r2.next_pos_intention is not None:
+                    if tuple(r1.next_pos_intention) == tuple(r2.pos) and tuple(r2.next_pos_intention) == tuple(r1.pos):
+                        # Les deux se foncent dessus, un seul passe
+                        if random.choice([True, False]): r1.next_pos_intention = None
+                        else: r2.next_pos_intention = None
+        
+        # Résolution Conflit avec un robot stationnaire
+        stationary_pos = set()
+        for r in robots:
+            if r.next_pos_intention is None: stationary_pos.add(tuple(r.pos))
+        for r in robots:
+            if r.next_pos_intention is not None:
+                if tuple(r.next_pos_intention) in stationary_pos:
+                    r.next_pos_intention = None # Bloqué par un robot immobile
+                    stationary_pos.add(tuple(r.pos)) # Devient immobile à son tour
+
+        # 5. Exécution des mouvements validés
+        for r in robots: r.execute_move(robots)
+        
+        step_cnt += 1
+        
+        # Mise à jour des graphiques toutes les 5 steps
+        if step_cnt % 5 == 0:
+            history['steps'].append(step_cnt)
+            history['coverage'].append(round(cov, 2))
+            history['redundancy'].append(env.redundancy_score)
+
+        new_blocks = env.newly_discovered[:]
+        env.newly_discovered = []
+
+        # Construction de l'état actuel de la simulation
+        batch.append({
+            'status': 'RUNNING',
+            'robots': [{
+                'id': r.id, 
+                'x': int(r.pos[0]), 'y': int(r.pos[1]),
+                'battery': r.battery, 'max_battery': CONFIG['BATTERY'],
+                'mode': r.current_mode,
+                'collision': r.last_collision
+            } for r in robots],
+            'new_blocks': new_blocks,
+            'stats': {
+                'step': step_cnt, 
+                'coverage': round(cov, 2),
+                'redundancy': env.redundancy_score
+            },
+            'graph': {'steps': history['steps'][:], 'coverage': history['coverage'][:], 'redundancy': history['redundancy'][:]} if step_cnt % 5 == 0 else None,
+            'base': {'x': int(CHARGING_STATION[0]), 'y': int(CHARGING_STATION[1])}
+        })
+
+    return jsonify({'batch': batch})
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5001)
+    app.run(debug=True, port=5000)

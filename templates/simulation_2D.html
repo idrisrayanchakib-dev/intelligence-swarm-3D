@@ -454,29 +454,66 @@
         scene.add(group); return group;
     }
 
+    let frameQueue = [];
+    let fetching = false;
+    let simulationRunning = false;
+
+    async function fetchBatch() {
+        if (fetching) return;
+        fetching = true;
+        try {
+            const res = await fetch('/step?n=15'); 
+            const data = await res.json();
+            if (data.batch && data.batch.length > 0) {
+                frameQueue.push(...data.batch);
+            } else if (data.status === 'ERROR') {
+                addLog("[ERROR] Engine failure.");
+            }
+        } catch (e) {
+            console.error("Batch fetch error:", e);
+        }
+        fetching = false;
+    }
+
+    function processQueue() {
+        if (!simulationRunning) return;
+        
+        if (frameQueue.length < 5) fetchBatch();
+        
+        if (frameQueue.length === 0) {
+            setTimeout(processQueue, 50);
+            return;
+        }
+
+        const data = frameQueue.shift();
+
+        if(data.status === 'COMPLETE') {
+            simulationRunning = false;
+            document.getElementById('end-reason').innerText = data.reason;
+            
+            let rawCov = data.stats ? data.stats.coverage : 0;
+            let finalCov = Number(rawCov).toFixed(2);
+            
+            const finalRed = (data.stats && data.stats.redundancy !== undefined) ? data.stats.redundancy : document.getElementById('red-val').innerText;
+
+            document.getElementById('final-cov').innerText = finalCov + '%';
+            document.getElementById('final-red').innerText = finalRed;
+
+            document.getElementById('victory-modal').style.display = 'flex';
+            addLog("MISSION COMPLETE: " + data.reason);
+            return;
+        }
+
+        updateFrame(data);
+        setTimeout(processQueue, 30);
+    }
+
     function startSimulation() {
-        simInterval = setInterval(async () => {
-            try {
-                const res = await fetch('/step');
-                const data = await res.json();
+        simulationRunning = true;
+        processQueue();
+    }
 
-                if(data.status === 'COMPLETE') {
-                    clearInterval(simInterval);
-                    document.getElementById('end-reason').innerText = data.reason;
-                    
-                    // Récupération et Arrondi (2 chiffres après la virgule)
-                    let rawCov = data.stats ? data.stats.coverage : 0;
-                    let finalCov = Number(rawCov).toFixed(2); // <--- C'EST ICI LA CORRECTION
-                    
-                    const finalRed = (data.stats && data.stats.redundancy !== undefined) ? data.stats.redundancy : document.getElementById('red-val').innerText;
-
-                    document.getElementById('final-cov').innerText = finalCov + '%';
-                    document.getElementById('final-red').innerText = finalRed;
-
-                    document.getElementById('victory-modal').style.display = 'flex';
-                    addLog("MISSION COMPLETE: " + data.reason);
-                    return;
-                }
+    function updateFrame(data) {
 
                 document.getElementById('cov-circle').setAttribute('stroke-dasharray', `${data.stats.coverage}, 100`);
                 document.getElementById('cov-text').textContent = Math.round(data.stats.coverage) + '%';
@@ -565,10 +602,6 @@
                     if(b.type === 2) { dummy.position.set(b.x, 0.5, b.y); dummy.updateMatrix(); obstacleMesh.setMatrixAt(obstacleCount++, dummy.matrix); }
                 });
                 if(data.new_blocks.length > 0) obstacleMesh.instanceMatrix.needsUpdate = true;
-
-            } catch(e) { console.error("Sim Error:", e); }
-
-        }, 100);
     }
 
     function animate() {
