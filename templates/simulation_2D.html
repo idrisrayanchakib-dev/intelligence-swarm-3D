@@ -514,94 +514,94 @@
     }
 
     function updateFrame(data) {
+        document.getElementById('cov-circle').setAttribute('stroke-dasharray', `${data.stats.coverage}, 100`);
+        document.getElementById('cov-text').textContent = Math.round(data.stats.coverage) + '%';
+        
+        document.getElementById('step-val').innerText = data.stats.step;
+        document.getElementById('red-val').innerText = data.stats.redundancy;
+        
+        const sec = Math.floor((Date.now() - startTime) / 1000);
+        document.getElementById('time-val').innerText = `${Math.floor(sec/60).toString().padStart(2,'0')}:${(sec%60).toString().padStart(2,'0')}`;
+        
+        let eff = 0; if (data.stats.coverage > lastCoverage) eff = (data.stats.coverage - lastCoverage).toFixed(2);
+        lastCoverage = data.stats.coverage;
+        document.getElementById('eff-metric').innerText = eff;
 
-                document.getElementById('cov-circle').setAttribute('stroke-dasharray', `${data.stats.coverage}, 100`);
-                document.getElementById('cov-text').textContent = Math.round(data.stats.coverage) + '%';
-                
-                document.getElementById('step-val').innerText = data.stats.step;
-                document.getElementById('red-val').innerText = data.stats.redundancy;
-                
-                const sec = Math.floor((Date.now() - startTime) / 1000);
-                document.getElementById('time-val').innerText = `${Math.floor(sec/60).toString().padStart(2,'0')}:${(sec%60).toString().padStart(2,'0')}`;
-                
-                let eff = 0; if (data.stats.coverage > lastCoverage) eff = (data.stats.coverage - lastCoverage).toFixed(2);
-                lastCoverage = data.stats.coverage;
-                document.getElementById('eff-metric').innerText = eff;
+        let totalBatt = 0;
+        let activeCount = 0;
+        data.robots.forEach(r => { totalBatt += (r.battery / r.max_battery) * 100; activeCount++; });
+        const avgBatt = activeCount > 0 ? Math.round(totalBatt / activeCount) : 0;
+        document.getElementById('avg-batt').innerText = avgBatt + "%";
+        document.getElementById('global-batt-bar').style.width = avgBatt + "%";
+        document.getElementById('global-batt-bar').style.background = avgBatt > 50 ? 'linear-gradient(90deg, #00ff00, #ffff00)' : 'linear-gradient(90deg, #ff0000, #ff8800)';
+        document.getElementById('eff-val').innerText = "+" + eff + "%";
 
-                let totalBatt = 0;
-                let activeCount = 0;
-                data.robots.forEach(r => { totalBatt += (r.battery / r.max_battery) * 100; activeCount++; });
-                const avgBatt = activeCount > 0 ? Math.round(totalBatt / activeCount) : 0;
-                document.getElementById('avg-batt').innerText = avgBatt + "%";
-                document.getElementById('global-batt-bar').style.width = avgBatt + "%";
-                document.getElementById('global-batt-bar').style.background = avgBatt > 50 ? 'linear-gradient(90deg, #00ff00, #ffff00)' : 'linear-gradient(90deg, #ff0000, #ff8800)';
-                document.getElementById('eff-val').innerText = "+" + eff + "%";
+        if(data.base) createBaseStation(data.base.x, data.base.y);
 
-                if(data.base) createBaseStation(data.base.x, data.base.y);
+        // FIX: data.graph is null on non-multiples of 5 — guard against it
+        if(data.graph && data.graph.steps && data.graph.steps.length > 0) {
+            perfChart.data.labels = data.graph.steps;
+            perfChart.data.datasets[0].data = data.graph.coverage;
+            perfChart.data.datasets[1].data = data.graph.redundancy;
+            perfChart.update('none');
+        }
 
-                if(data.graph.steps.length > 0) {
-                    perfChart.data.labels = data.graph.steps;
-                    perfChart.data.datasets[0].data = data.graph.coverage;
-                    perfChart.data.datasets[1].data = data.graph.redundancy;
-                    perfChart.update('none');
-                }
+        const list = document.getElementById('unit-list'); list.innerHTML = '';
+        let anyCollision = false;
 
-                const list = document.getElementById('unit-list'); list.innerHTML = '';
-                let anyCollision = false;
+        data.robots.forEach(r => {
+            if(!robotMeshes[r.id]) robotMeshes[r.id] = createRobot(r.id);
+            const mesh = robotMeshes[r.id];
+            const target = new THREE.Vector3(r.x, 0, r.y);
+            mesh.position.lerp(target, 0.3);
+            mesh.lookAt(target);
 
-                data.robots.forEach(r => {
-                    if(!robotMeshes[r.id]) robotMeshes[r.id] = createRobot(r.id);
-                    const mesh = robotMeshes[r.id];
-                    const target = new THREE.Vector3(r.x, 0, r.y);
-                    mesh.position.lerp(target, 0.3);
-                    mesh.lookAt(target);
+            if (r.collision) {
+                anyCollision = true; mesh.children[1].material.color.setHex(0xff0000); mesh.scale.set(1, 1, 1);
+                addLog(`WARNING: Unit ${r.id} Collision Detected!`);
+            } else {
+                const normalCol = [0x00ffff, 0xff00ff, 0xffff00, 0x00ff00][r.id%4]; mesh.children[1].material.color.setHex(normalCol); mesh.scale.set(1, 1, 1);
+            }
 
-                    if (r.collision) {
-                        anyCollision = true; mesh.children[1].material.color.setHex(0xff0000); mesh.scale.set(1, 1, 1);
-                        addLog(`WARNING: Unit ${r.id} Collision Detected!`);
-                    } else {
-                        const normalCol = [0x00ffff, 0xff00ff, 0xffff00, 0x00ff00][r.id%4]; mesh.children[1].material.color.setHex(normalCol); mesh.scale.set(1, 1, 1);
-                    }
+            const battPct = (r.battery / r.max_battery) * 100;
+            const segments = 10;
+            let battHtml = '';
+            for(let i=0; i<segments; i++) {
+                let cls = 'batt-segment';
+                if (i < (battPct/10)) cls += (battPct < 20 ? ' low' : ' active');
+                battHtml += `<div class="${cls}"></div>`;
+            }
+            const modeClass = r.mode.includes("BFS") ? "bfs-mode" : (r.mode.includes("RTB") ? "rtb-mode" : "dqn-mode");
+            const borderColor = ['#00ffff', '#ff00ff', '#ffff00', '#00ff00'][r.id%4];
 
-                    const battPct = (r.battery / r.max_battery) * 100;
-                    const segments = 10;
-                    let battHtml = '';
-                    for(let i=0; i<segments; i++) {
-                        let cls = 'batt-segment';
-                        if (i < (battPct/10)) cls += (battPct < 20 ? ' low' : ' active');
-                        battHtml += `<div class="${cls}"></div>`;
-                    }
-                    const modeClass = r.mode.includes("BFS") ? "bfs-mode" : (r.mode.includes("RTB") ? "rtb-mode" : "dqn-mode");
-                    const borderColor = ['#00ffff', '#ff00ff', '#ffff00', '#00ff00'][r.id%4];
-
-                    const d = document.createElement('div'); d.className = 'bot-card';
-                    d.style.borderLeftColor = borderColor;
-                    d.innerHTML = `
-                        <div class="bot-header">
-                            <div class="bot-id" style="color:${borderColor}">UNIT-${r.id}</div>
-                            <div class="bot-badge ${modeClass}">${r.mode}</div>
+            const d = document.createElement('div'); d.className = 'bot-card';
+            d.style.borderLeftColor = borderColor;
+            d.innerHTML = `
+                <div class="bot-header">
+                    <div class="bot-id" style="color:${borderColor}">UNIT-${r.id}</div>
+                    <div class="bot-badge ${modeClass}">${r.mode}</div>
+                </div>
+                <div class="bot-details">
+                    <div>LOC: <span style="color:#fff">${r.x}, ${r.y}</span></div>
+                    <div style="display:flex; align-items:center;">
+                        <span>PWR</span>
+                        <div class="bot-batt-wrapper">
+                            <div class="bot-batt-level" style="width:${battPct}%; background:${battPct<20?'red':'#00ff00'}"></div>
                         </div>
-                        <div class="bot-details">
-                            <div>LOC: <span style="color:#fff">${r.x}, ${r.y}</span></div>
-                            <div style="display:flex; align-items:center;">
-                                <span>PWR</span>
-                                <div class="bot-batt-wrapper">
-                                    <div class="bot-batt-level" style="width:${battPct}%; background:${battPct<20?'red':'#00ff00'}"></div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                    list.appendChild(d);
-                });
+                    </div>
+                </div>
+            `;
+            list.appendChild(d);
+        });
 
-                const alertBox = document.getElementById('collision-alert');
-                if(anyCollision) { alertBox.style.opacity = 1; alertBox.style.transform = "translateX(-50%) scale(1.1)"; } 
-                else { alertBox.style.opacity = 0; alertBox.style.transform = "translateX(-50%) scale(1)"; }
+        const alertBox = document.getElementById('collision-alert');
+        if(anyCollision) { alertBox.style.opacity = 1; alertBox.style.transform = "translateX(-50%) scale(1.1)"; } 
+        else { alertBox.style.opacity = 0; alertBox.style.transform = "translateX(-50%) scale(1)"; }
 
-                data.new_blocks.forEach(b => {
-                    if(b.type === 2) { dummy.position.set(b.x, 0.5, b.y); dummy.updateMatrix(); obstacleMesh.setMatrixAt(obstacleCount++, dummy.matrix); }
-                });
-                if(data.new_blocks.length > 0) obstacleMesh.instanceMatrix.needsUpdate = true;
+        data.new_blocks.forEach(b => {
+            if(b.type === 2) { dummy.position.set(b.x, 0.5, b.y); dummy.updateMatrix(); obstacleMesh.setMatrixAt(obstacleCount++, dummy.matrix); }
+        });
+        if(data.new_blocks.length > 0) obstacleMesh.instanceMatrix.needsUpdate = true;
     }
 
     function animate() {
